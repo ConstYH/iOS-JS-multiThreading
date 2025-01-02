@@ -1,0 +1,46 @@
+@startuml JS多线程执行流程
+
+participant "JS Main\nContext" as JSMain
+participant "JSContextManager" as Manager
+participant "JSThreadPool" as Pool
+participant "JSWorkerThread" as Worker
+participant "JSTask" as Task
+participant "Worker JS\nContext" as WorkerJS
+
+== 初始化阶段 ==
+JSMain -> Manager: 创建主Context
+activate Manager
+Manager --> JSMain: 返回主Context
+deactivate Manager
+
+== 任务提交阶段 ==
+JSMain -> Manager: doInSubThread(taskFunc, options)
+activate Manager
+Manager -> Task: 创建任务
+activate Task
+Task --> Manager: 返回任务实例
+deactivate Task
+
+Manager -> Pool: 提交任务
+activate Pool
+Pool -> Worker: 分配任务
+deactivate Pool
+
+== 任务执行阶段 ==
+activate Worker
+Worker -> Task: prepare()
+Worker -> WorkerJS: 注入任务参数
+Worker -> WorkerJS: 执行JS代码
+activate WorkerJS
+WorkerJS -> WorkerJS: 执行taskFunc
+WorkerJS --> Worker: 返回结果
+deactivate WorkerJS
+
+Worker -> Task: complete(result)
+Worker -> JSMain: 回调onResult
+deactivate Worker
+
+== 完成阶段 ==
+JSMain -> JSMain: onComplete回调
+
+@enduml
