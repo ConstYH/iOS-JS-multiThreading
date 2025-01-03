@@ -21,6 +21,8 @@
 
 @implementation JSWorkerThread
 
+@synthesize status = _status;
+
 - (instancetype)initWithDelegate:(id<JSWorkerDelegate>)delegate {
     if (self = [super init]) {
         _delegate = delegate;
@@ -35,6 +37,13 @@
 - (void)setupThread {
     self.thread = [[NSThread alloc] initWithTarget:self selector:@selector(threadMain) object:nil];
     self.thread.name = [NSString stringWithFormat:@"JSWorkerThread-%p", self];
+    
+    // 将任务队列关联到特定线程
+    dispatch_queue_set_specific(self.taskQueue, 
+                              (__bridge void *)self, 
+                              (__bridge void *)self.thread, 
+                              NULL);
+    
     [self.thread start];
 }
 
@@ -66,11 +75,11 @@
 - (void)executeTask:(JSTask *)task {
     if (!task) return;
     
-    // 直接在JS线程上执行，减少一次线程切换
-    [self performSelector:@selector(executeJSTask:)
-                onThread:self.thread
-              withObject:task
-           waitUntilDone:NO];
+    [self updateStatus:JSThreadStatusBusy completion:nil];
+    
+    dispatch_async(self.taskQueue, ^{
+        [self executeJSTask:task];
+    });
 }
 
 - (void)executeJSTask:(JSTask *)task {
@@ -97,12 +106,15 @@
         // 完成任务
         [task complete:result error:nil];
         
-        // 通知代理
-        if ([self.delegate respondsToSelector:@selector(worker:didCompleteTask:)]) {
-            [self.delegate worker:self didCompleteTask:task];
-        }
+        // 完成任务后更新状态
+        [self updateStatus:JSThreadStatusIdle completion:^{
+            if ([self.delegate respondsToSelector:@selector(worker:didCompleteTask:)]) {
+                [self.delegate worker:self didCompleteTask:task];
+            }
+        }];
     }
     @catch (NSException *exception) {
+        [self updateStatus:JSThreadStatusIdle completion:nil];
         NSLog(@"Worker %@ 执行出错: %@", self.thread.name, exception);
         NSError *error = [NSError errorWithDomain:@"JSWorkerErrorDomain"
                                            code:-1
@@ -120,18 +132,46 @@
 - (void)executeBlock:(void(^)(void))block {
     if (!block) return;
     
-    [self performSelector:@selector(executeBlockOnThread:)
-                onThread:self.thread
-              withObject:[block copy]
-           waitUntilDone:NO];
-}
-
-- (void)executeBlockOnThread:(void(^)(void))block {
-    block();
+    dispatch_async(self.taskQueue, ^{
+        block();
+    });
 }
 
 - (void)dealloc {
     [self.thread cancel];
+}
+
+- (void)executeBatchTasks:(NSArray<JSTask *> *)tasks {
+    if (tasks.count == 0) return;
+    
+    [self updateStatus:JSThreadStatusBusy completion:nil];
+    
+    dispatch_async(self.taskQueue, ^{
+        for (JSTask *task in tasks) {
+            [self executeJSTask:task];
+        }
+        [self updateStatus:JSThreadStatusIdle completion:nil];
+    });
+}
+
+- (void)updateStatus:(JSThreadStatus)newStatus completion:(void(^)(void))completion {
+    dispatch_async(self.taskQueue, ^{
+        self.status = newStatus;
+        if (completion) {
+            completion();
+        }
+    });
+}
+
+- (JSThreadStatus)status {
+    __block JSThreadStatus currentStatus;
+    __weak typeof(self) weakSelf = self;
+    dispatch_sync(self.taskQueue, ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        currentStatus = strongSelf->_status;
+    });
+    return currentStatus;
 }
 
 @end

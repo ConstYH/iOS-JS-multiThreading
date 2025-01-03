@@ -22,11 +22,12 @@
 
 @property (nonatomic, strong) JSContext *jsContext;
 @property (nonatomic, strong) NSMutableArray<JSTask *> *pendingTasks;
-@property (nonatomic, assign) JSThreadStatus status;
+@property (atomic, assign) JSThreadStatus status;
 
 - (instancetype)initWithDelegate:(id<JSWorkerDelegate>)delegate;
 - (void)setupJSContext;
 - (void)executeTask:(JSTask *)task;
 - (void)executeBlock:(void(^)(void))block;
+- (void)updateStatus:(JSThreadStatus)newStatus completion:(void(^)(void))completion;
 
 @end

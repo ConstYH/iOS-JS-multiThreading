@@ -236,7 +236,6 @@
                 dispatch_group_leave(group);
             };
             // 计算创建耗时
-            NSTimeInterval creationTime = [[NSDate date] timeIntervalSinceDate:creationStartTime];
             NSLog(@"Worker %@ 创建耗时: %.2f ms", task, [task lifeTime]);
             // 提交到线程池执行
             [[JSThreadPoolManager sharedInstance] executeTask:task];
